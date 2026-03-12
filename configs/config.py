@@ -10,5 +10,5 @@ CFG = {
     "WEIGHT_DECAY": 1e-4,
 }
 
-BASE_PATH = "/content/open"
+BASE_PATH = "/content/drive/MyDrive/데이콘/open"
 MODEL_SAVE_PATH = "best_model.pth"
