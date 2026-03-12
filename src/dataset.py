@@ -16,20 +16,26 @@ class MultiViewDataset(Dataset):
     def __getitem__(self, idx):
         sample_id = self.df.iloc[idx, 0]
 
+        # 이미지 경로
         front_path = os.path.join(self.image_root, sample_id, "front.png")
-        side_path = os.path.join(self.image_root, sample_id, "side.png")
+        top_path = os.path.join(self.image_root, sample_id, "top.png")
 
+        # 이미지 로드
         front_img = Image.open(front_path).convert("RGB")
-        side_img = Image.open(side_path).convert("RGB")
+        top_img = Image.open(top_path).convert("RGB")
 
+        # Transform 적용
         if self.transform:
             front_img = self.transform(front_img)
-            side_img = self.transform(side_img)
+            top_img = self.transform(top_img)
 
-        views = [front_img, side_img]
+        views = [front_img, top_img]
 
+        # 테스트 데이터
         if self.is_test:
             return views
 
+        # 학습 데이터
         label = self.df.iloc[idx, 1]
+
         return views, label
