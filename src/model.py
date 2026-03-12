@@ -1,25 +1,35 @@
 import torch
 import torch.nn as nn
-from torchvision import models
+import timm
 
 
-class MultiViewResNet(nn.Module):
-    def __init__(self, num_classes=1):
-        super(MultiViewResNet, self).__init__()
+class MultiViewEfficientNet(nn.Module):
+    def __init__(self, model_name="efficientnet_b0", dropout=0.3, num_classes=1):
+        super().__init__()
 
-        self.backbone = models.resnet18(weights="DEFAULT")
-        self.feature_extractor = nn.Sequential(*list(self.backbone.children())[:-1])
+        self.backbone = timm.create_model(
+            model_name,
+            pretrained=True,
+            num_classes=0,
+            global_pool="avg"
+        )
+
+        feature_dim = self.backbone.num_features
 
         self.classifier = nn.Sequential(
-            nn.Linear(512 * 2, 256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, num_classes)
+            nn.Linear(feature_dim * 2, 512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(512, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(128, num_classes)
         )
 
     def forward(self, views):
-        f1 = self.feature_extractor(views[0]).view(views[0].size(0), -1)
-        f2 = self.feature_extractor(views[1]).view(views[1].size(0), -1)
+        f1 = self.backbone(views[0])
+        f2 = self.backbone(views[1])
 
-        combined = torch.cat((f1, f2), dim=1)
-        return self.classifier(combined)
+        combined = torch.cat([f1, f2], dim=1)
+        out = self.classifier(combined)
+        return out
