@@ -14,14 +14,14 @@ class MultiViewDataset(Dataset):
     def __len__(self):
         return len(self.df)
 
-    def _load_image(self, path):
-        image = cv2.imread(path)
-        if image is None:
-            raise FileNotFoundError(f"이미지를 찾을 수 없습니다: {path}")
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        return image
+    def load_image(self, path):
+        img = cv2.imread(path)
+        if img is None:
+            raise FileNotFoundError(path)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        return img
 
-    def _label_to_float(self, label):
+    def label_to_float(self, label):
         if isinstance(label, str):
             label = label.strip().lower()
             if label == "stable":
@@ -31,19 +31,22 @@ class MultiViewDataset(Dataset):
         return float(label)
 
     def __getitem__(self, idx):
+
         row = self.df.iloc[idx]
         sample_id = str(row["id"])
-        sample_dir = os.path.join(self.image_root, sample_id)
 
-        front = self._load_image(os.path.join(sample_dir, "front.png"))
-        top = self._load_image(os.path.join(sample_dir, "top.png"))
+        folder = os.path.join(self.image_root, sample_id)
 
-        if self.transform is not None:
+        front = self.load_image(os.path.join(folder, "front.png"))
+        top = self.load_image(os.path.join(folder, "top.png"))
+
+        if self.transform:
             front = self.transform(image=front)["image"]
             top = self.transform(image=top)["image"]
 
         if self.is_test:
             return [front, top]
 
-        label = torch.tensor(self._label_to_float(row["label"]), dtype=torch.float32)
+        label = torch.tensor(self.label_to_float(row["label"]), dtype=torch.float32)
+
         return [front, top], label

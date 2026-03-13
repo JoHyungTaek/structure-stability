@@ -11,6 +11,7 @@ CFG = {
     "AMP": True,
     "PATIENCE": 3,
     "TTA": True,
+    "LABEL_SMOOTHING": 0.0,
 }
 
 BASE_PATH = "/content/drive/MyDrive/데이콘/open"
