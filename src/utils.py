@@ -25,7 +25,3 @@ def label_to_int(x):
         if x == "unstable":
             return 1
     return int(float(x))
-
-
-def ensure_dir(path):
-    os.makedirs(path, exist_ok=True)

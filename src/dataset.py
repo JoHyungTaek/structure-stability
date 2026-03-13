@@ -1,49 +1,37 @@
-import os
-import cv2
 import torch
-from torch.utils.data import Dataset
+import torch.nn as nn
+import timm
 
 
-class MultiViewDataset(Dataset):
-    def __init__(self, df, image_root, transform=None, is_test=False):
-        self.df = df.reset_index(drop=True)
-        self.image_root = image_root
-        self.transform = transform
-        self.is_test = is_test
+class MultiViewClassifier(nn.Module):
+    def __init__(self, model_name="efficientnet_b3", dropout=0.4):
+        super().__init__()
 
-    def __len__(self):
-        return len(self.df)
+        self.backbone = timm.create_model(
+            model_name,
+            pretrained=True,
+            num_classes=0,
+            global_pool="avg",
+        )
 
-    def _load_image(self, path):
-        image = cv2.imread(path)
-        if image is None:
-            raise FileNotFoundError(f"이미지를 찾을 수 없습니다: {path}")
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        return image
+        feature_dim = self.backbone.num_features
 
-    def _label_to_float(self, label):
-        if isinstance(label, str):
-            label = label.strip().lower()
-            if label == "stable":
-                return 0.0
-            if label == "unstable":
-                return 1.0
-        return float(label)
+        self.classifier = nn.Sequential(
+            nn.Linear(feature_dim * 2, 512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
 
-    def __getitem__(self, idx):
-        row = self.df.iloc[idx]
-        sample_id = str(row["id"])
-        sample_dir = os.path.join(self.image_root, sample_id)
+            nn.Linear(512, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
 
-        front = self._load_image(os.path.join(sample_dir, "front.png"))
-        top = self._load_image(os.path.join(sample_dir, "top.png"))
+            nn.Linear(128, 1),
+        )
 
-        if self.transform is not None:
-            front = self.transform(image=front)["image"]
-            top = self.transform(image=top)["image"]
+    def forward(self, views):
+        front_feat = self.backbone(views[0])
+        top_feat = self.backbone(views[1])
 
-        if self.is_test:
-            return [front, top]
-
-        label = torch.tensor(self._label_to_float(row["label"]), dtype=torch.float32)
-        return [front, top], label
+        fused = torch.cat([front_feat, top_feat], dim=1)
+        logits = self.classifier(fused)
+        return logits
