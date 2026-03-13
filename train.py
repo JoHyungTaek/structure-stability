@@ -47,25 +47,46 @@ def label_to_int(x):
     return int(float(x))
 
 
+def smooth_labels(labels, smoothing=0.02):
+    return labels * (1.0 - smoothing) + 0.5 * smoothing
+
+
 def get_train_transform():
+    size = CFG["IMG_SIZE"]
     return A.Compose([
-        A.Resize(CFG["IMG_SIZE"], CFG["IMG_SIZE"]),
+        A.Resize(size, size),
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.2),
         A.RandomRotate90(p=0.3),
         A.ShiftScaleRotate(
-            shift_limit=0.05,
+            shift_limit=0.06,
             scale_limit=0.10,
             rotate_limit=15,
             border_mode=0,
             p=0.5
         ),
         A.RandomBrightnessContrast(
-            brightness_limit=0.15,
-            contrast_limit=0.15,
-            p=0.5
+            brightness_limit=0.20,
+            contrast_limit=0.20,
+            p=0.6
+        ),
+        A.ColorJitter(
+            brightness=0.15,
+            contrast=0.15,
+            saturation=0.15,
+            hue=0.08,
+            p=0.35
         ),
         A.GaussNoise(p=0.2),
+        A.CoarseDropout(
+            max_holes=6,
+            max_height=size // 12,
+            max_width=size // 12,
+            min_holes=1,
+            min_height=size // 32,
+            min_width=size // 32,
+            p=0.25
+        ),
         A.Normalize(mean=(0.485, 0.456, 0.406),
                     std=(0.229, 0.224, 0.225)),
         ToTensorV2(),
@@ -73,8 +94,9 @@ def get_train_transform():
 
 
 def get_valid_transform():
+    size = CFG["IMG_SIZE"]
     return A.Compose([
-        A.Resize(CFG["IMG_SIZE"], CFG["IMG_SIZE"]),
+        A.Resize(size, size),
         A.Normalize(mean=(0.485, 0.456, 0.406),
                     std=(0.229, 0.224, 0.225)),
         ToTensorV2(),
@@ -126,28 +148,36 @@ def build_dataloaders():
 def train_one_epoch(model, loader, criterion, optimizer, device, scaler):
     model.train()
     losses = []
+    optimizer.zero_grad()
 
-    for views, labels in tqdm(loader, desc="Train", leave=False):
+    for step, (views, labels) in enumerate(tqdm(loader, desc="Train", leave=False), start=1):
         views = [v.to(device) for v in views]
         labels = labels.unsqueeze(1).to(device)
-
-        optimizer.zero_grad()
+        labels = smooth_labels(labels, CFG["LABEL_SMOOTHING"])
 
         if CFG["AMP"]:
             with torch.cuda.amp.autocast():
                 logits = model(views)
                 loss = criterion(logits, labels)
+                loss = loss / CFG["ACCUM_STEPS"]
 
             scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+
+            if step % CFG["ACCUM_STEPS"] == 0 or step == len(loader):
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
         else:
             logits = model(views)
             loss = criterion(logits, labels)
+            loss = loss / CFG["ACCUM_STEPS"]
             loss.backward()
-            optimizer.step()
 
-        losses.append(loss.item())
+            if step % CFG["ACCUM_STEPS"] == 0 or step == len(loader):
+                optimizer.step()
+                optimizer.zero_grad()
+
+        losses.append(loss.item() * CFG["ACCUM_STEPS"])
 
     return float(np.mean(losses))
 

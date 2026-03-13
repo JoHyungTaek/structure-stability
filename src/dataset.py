@@ -21,7 +21,7 @@ class MultiViewDataset(Dataset):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         return image
 
-    def _label_to_int(self, label):
+    def _label_to_float(self, label):
         if isinstance(label, str):
             label = label.strip().lower()
             if label == "stable":
@@ -35,20 +35,15 @@ class MultiViewDataset(Dataset):
         sample_id = str(row["id"])
         sample_dir = os.path.join(self.image_root, sample_id)
 
-        front_path = os.path.join(sample_dir, "front.png")
-        top_path = os.path.join(sample_dir, "top.png")
-
-        front_img = self._load_image(front_path)
-        top_img = self._load_image(top_path)
+        front = self._load_image(os.path.join(sample_dir, "front.png"))
+        top = self._load_image(os.path.join(sample_dir, "top.png"))
 
         if self.transform is not None:
-            front_img = self.transform(image=front_img)["image"]
-            top_img = self.transform(image=top_img)["image"]
+            front = self.transform(image=front)["image"]
+            top = self.transform(image=top)["image"]
 
         if self.is_test:
-            return [front_img, top_img]
+            return [front, top]
 
-        label = self._label_to_int(row["label"])
-        label = torch.tensor(label, dtype=torch.float32)
-
-        return [front_img, top_img], label
+        label = torch.tensor(self._label_to_float(row["label"]), dtype=torch.float32)
+        return [front, top], label

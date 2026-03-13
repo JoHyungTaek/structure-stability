@@ -15,8 +15,9 @@ from src.model import MultiViewClassifier
 
 
 def get_test_transform():
+    size = CFG["IMG_SIZE"]
     return A.Compose([
-        A.Resize(CFG["IMG_SIZE"], CFG["IMG_SIZE"]),
+        A.Resize(size, size),
         A.Normalize(mean=(0.485, 0.456, 0.406),
                     std=(0.229, 0.224, 0.225)),
         ToTensorV2(),
@@ -24,8 +25,9 @@ def get_test_transform():
 
 
 def get_test_transform_hflip():
+    size = CFG["IMG_SIZE"]
     return A.Compose([
-        A.Resize(CFG["IMG_SIZE"], CFG["IMG_SIZE"]),
+        A.Resize(size, size),
         A.HorizontalFlip(p=1.0),
         A.Normalize(mean=(0.485, 0.456, 0.406),
                     std=(0.229, 0.224, 0.225)),
