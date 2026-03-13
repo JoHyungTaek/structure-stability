@@ -3,21 +3,21 @@ import torch.nn as nn
 import timm
 
 
-class MultiViewB3(nn.Module):
-    def __init__(self, dropout=0.4):
+class MultiViewClassifier(nn.Module):
+    def __init__(self, model_name="efficientnet_b3", dropout=0.4):
         super().__init__()
 
         self.backbone = timm.create_model(
-            "efficientnet_b3",
+            model_name,
             pretrained=True,
             num_classes=0,
             global_pool="avg",
         )
 
-        feat_dim = self.backbone.num_features
+        feature_dim = self.backbone.num_features
 
-        self.head = nn.Sequential(
-            nn.Linear(feat_dim * 2, 512),
+        self.classifier = nn.Sequential(
+            nn.Linear(feature_dim * 2, 512),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
 
@@ -29,7 +29,9 @@ class MultiViewB3(nn.Module):
         )
 
     def forward(self, views):
-        f1 = self.backbone(views[0])
-        f2 = self.backbone(views[1])
-        x = torch.cat([f1, f2], dim=1)
-        return self.head(x)
+        front_feat = self.backbone(views[0])
+        top_feat = self.backbone(views[1])
+
+        fused = torch.cat([front_feat, top_feat], dim=1)
+        logits = self.classifier(fused)
+        return logits
