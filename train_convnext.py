@@ -17,14 +17,14 @@ from albumentations.pytorch import ToTensorV2
 
 from sklearn.metrics import log_loss, accuracy_score
 
-from configs.config import CFG, BASE_PATH, MODEL_PATH
+from configs.config_convnext import CFG, BASE_PATH, MODEL_PATH
 from src.dataset import MultiViewDataset
-from src.model import MultiViewClassifier
+from src.model_convnext import MultiViewConvNext
 
 warnings.filterwarnings("ignore")
 
 
-def seed_everything(seed: int):
+def seed_everything(seed):
     random.seed(seed)
     np.random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
@@ -65,10 +65,8 @@ def get_train_transform():
             p=0.5
         ),
         A.GaussNoise(p=0.2),
-        A.Normalize(
-            mean=(0.485, 0.456, 0.406),
-            std=(0.229, 0.224, 0.225)
-        ),
+        A.Normalize(mean=(0.485, 0.456, 0.406),
+                    std=(0.229, 0.224, 0.225)),
         ToTensorV2(),
     ])
 
@@ -77,10 +75,8 @@ def get_valid_transform():
     size = CFG["IMG_SIZE"]
     return A.Compose([
         A.Resize(size, size),
-        A.Normalize(
-            mean=(0.485, 0.456, 0.406),
-            std=(0.229, 0.224, 0.225)
-        ),
+        A.Normalize(mean=(0.485, 0.456, 0.406),
+                    std=(0.229, 0.224, 0.225)),
         ToTensorV2(),
     ])
 
@@ -93,17 +89,17 @@ def build_dataloaders():
     dev_df["label"] = dev_df["label"].apply(label_to_int)
 
     train_dataset = MultiViewDataset(
-        df=train_df,
-        image_root=os.path.join(BASE_PATH, "train"),
+        train_df,
+        os.path.join(BASE_PATH, "train"),
         transform=get_train_transform(),
-        is_test=False,
+        is_test=False
     )
 
     valid_dataset = MultiViewDataset(
-        df=dev_df,
-        image_root=os.path.join(BASE_PATH, "dev"),
+        dev_df,
+        os.path.join(BASE_PATH, "dev"),
         transform=get_valid_transform(),
-        is_test=False,
+        is_test=False
     )
 
     train_loader = DataLoader(
@@ -111,8 +107,7 @@ def build_dataloaders():
         batch_size=CFG["BATCH_SIZE"],
         shuffle=True,
         num_workers=CFG["NUM_WORKERS"],
-        pin_memory=True,
-        drop_last=False,
+        pin_memory=True
     )
 
     valid_loader = DataLoader(
@@ -120,8 +115,7 @@ def build_dataloaders():
         batch_size=CFG["BATCH_SIZE"],
         shuffle=False,
         num_workers=CFG["NUM_WORKERS"],
-        pin_memory=True,
-        drop_last=False,
+        pin_memory=True
     )
 
     return train_loader, valid_loader
@@ -131,25 +125,19 @@ def train_one_epoch(model, loader, criterion, optimizer, device, scaler):
     model.train()
     losses = []
 
-    for views, labels in tqdm(loader, desc="Train", leave=False):
+    for views, labels in tqdm(loader, desc="Train ConvNext", leave=False):
         views = [v.to(device) for v in views]
         labels = labels.unsqueeze(1).to(device)
 
         optimizer.zero_grad()
 
-        if CFG["AMP"]:
-            with torch.cuda.amp.autocast():
-                logits = model(views)
-                loss = criterion(logits, labels)
-
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
+        with torch.cuda.amp.autocast(enabled=CFG["AMP"]):
             logits = model(views)
             loss = criterion(logits, labels)
-            loss.backward()
-            optimizer.step()
+
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         losses.append(loss.item())
 
@@ -163,28 +151,28 @@ def validate(model, loader, criterion, device):
     probs_all = []
     labels_all = []
 
-    for views, labels in tqdm(loader, desc="Valid", leave=False):
+    for views, labels in tqdm(loader, desc="Valid ConvNext", leave=False):
         views = [v.to(device) for v in views]
         labels = labels.unsqueeze(1).to(device)
 
         logits = model(views)
         loss = criterion(logits, labels)
 
-        probs = torch.sigmoid(logits).detach().cpu().numpy().reshape(-1)
-        labels_np = labels.detach().cpu().numpy().reshape(-1)
+        probs = torch.sigmoid(logits).cpu().numpy().reshape(-1)
+        labs = labels.cpu().numpy().reshape(-1)
 
         losses.append(loss.item())
         probs_all.extend(probs.tolist())
-        labels_all.extend(labels_np.tolist())
+        labels_all.extend(labs.tolist())
 
     probs_all = np.clip(np.array(probs_all), 1e-7, 1 - 1e-7)
     labels_all = np.array(labels_all)
 
-    valid_loss = float(np.mean(losses))
-    valid_logloss = log_loss(labels_all, probs_all)
-    valid_acc = accuracy_score(labels_all, (probs_all >= 0.5).astype(int))
-
-    return valid_loss, valid_logloss, valid_acc
+    return (
+        float(np.mean(losses)),
+        log_loss(labels_all, probs_all),
+        accuracy_score(labels_all, (probs_all >= 0.5).astype(int))
+    )
 
 
 def main():
@@ -193,10 +181,7 @@ def main():
 
     train_loader, valid_loader = build_dataloaders()
 
-    model = MultiViewClassifier(
-        model_name=CFG["MODEL_NAME"],
-        dropout=CFG["DROPOUT"]
-    ).to(device)
+    model = MultiViewConvNext(dropout=CFG["DROPOUT"]).to(device)
 
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.AdamW(
@@ -204,27 +189,18 @@ def main():
         lr=CFG["LEARNING_RATE"],
         weight_decay=CFG["WEIGHT_DECAY"]
     )
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=CFG["EPOCHS"]
-    )
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG["EPOCHS"])
     scaler = torch.cuda.amp.GradScaler(enabled=CFG["AMP"])
 
     best_logloss = float("inf")
     patience_count = 0
 
     for epoch in range(1, CFG["EPOCHS"] + 1):
-        train_loss = train_one_epoch(
-            model, train_loader, criterion, optimizer, device, scaler
-        )
-
-        valid_loss, valid_logloss, valid_acc = validate(
-            model, valid_loader, criterion, device
-        )
-
+        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, scaler)
+        valid_loss, valid_logloss, valid_acc = validate(model, valid_loader, criterion, device)
         scheduler.step()
 
-        print(f"[Epoch {epoch}/{CFG['EPOCHS']}]")
+        print(f"[ConvNext Epoch {epoch}/{CFG['EPOCHS']}]")
         print(f"Train Loss   : {train_loss:.4f}")
         print(f"Valid Loss   : {valid_loss:.4f}")
         print(f"Valid LogLoss: {valid_logloss:.6f}")
@@ -242,9 +218,9 @@ def main():
                 break
 
     print("=" * 50)
-    print(f"Best Dev LogLoss: {best_logloss:.6f}")
+    print(f"ConvNext Best Dev LogLoss: {best_logloss:.6f}")
 
-    del model, train_loader, valid_loader
+    del model
     gc.collect()
     torch.cuda.empty_cache()
 
