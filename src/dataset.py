@@ -14,14 +14,14 @@ class MultiViewDataset(Dataset):
     def __len__(self):
         return len(self.df)
 
-    def load_image(self, path):
-        img = cv2.imread(path)
-        if img is None:
-            raise FileNotFoundError(path)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        return img
+    def _load_image(self, path):
+        image = cv2.imread(path)
+        if image is None:
+            raise FileNotFoundError(f"이미지를 찾을 수 없습니다: {path}")
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        return image
 
-    def label_to_float(self, label):
+    def _label_to_float(self, label):
         if isinstance(label, str):
             label = label.strip().lower()
             if label == "stable":
@@ -31,22 +31,22 @@ class MultiViewDataset(Dataset):
         return float(label)
 
     def __getitem__(self, idx):
-
         row = self.df.iloc[idx]
         sample_id = str(row["id"])
+        sample_dir = os.path.join(self.image_root, sample_id)
 
-        folder = os.path.join(self.image_root, sample_id)
+        front_path = os.path.join(sample_dir, "front.png")
+        top_path = os.path.join(sample_dir, "top.png")
 
-        front = self.load_image(os.path.join(folder, "front.png"))
-        top = self.load_image(os.path.join(folder, "top.png"))
+        front_img = self._load_image(front_path)
+        top_img = self._load_image(top_path)
 
-        if self.transform:
-            front = self.transform(image=front)["image"]
-            top = self.transform(image=top)["image"]
+        if self.transform is not None:
+            front_img = self.transform(image=front_img)["image"]
+            top_img = self.transform(image=top_img)["image"]
 
         if self.is_test:
-            return [front, top]
+            return [front_img, top_img]
 
-        label = torch.tensor(self.label_to_float(row["label"]), dtype=torch.float32)
-
-        return [front, top], label
+        label = torch.tensor(self._label_to_float(row["label"]), dtype=torch.float32)
+        return [front_img, top_img], label

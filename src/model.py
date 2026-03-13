@@ -4,7 +4,6 @@ import timm
 
 
 class MultiViewClassifier(nn.Module):
-
     def __init__(self, model_name="efficientnet_b3", dropout=0.4):
         super().__init__()
 
@@ -12,14 +11,13 @@ class MultiViewClassifier(nn.Module):
             model_name,
             pretrained=True,
             num_classes=0,
-            global_pool="avg"
+            global_pool="avg",
         )
 
-        feat_dim = self.backbone.num_features
+        feature_dim = self.backbone.num_features
 
-        self.head = nn.Sequential(
-
-            nn.Linear(feat_dim * 2, 512),
+        self.classifier = nn.Sequential(
+            nn.Linear(feature_dim * 2, 512),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
 
@@ -27,15 +25,13 @@ class MultiViewClassifier(nn.Module):
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
 
-            nn.Linear(128, 1)
-
+            nn.Linear(128, 1),
         )
 
     def forward(self, views):
+        front_feat = self.backbone(views[0])
+        top_feat = self.backbone(views[1])
 
-        f1 = self.backbone(views[0])
-        f2 = self.backbone(views[1])
-
-        x = torch.cat([f1, f2], dim=1)
-
-        return self.head(x)
+        fused = torch.cat([front_feat, top_feat], dim=1)
+        logits = self.classifier(fused)
+        return logits
