@@ -1,37 +1,52 @@
+import os
+import cv2
 import torch
-import torch.nn as nn
-import timm
+from torch.utils.data import Dataset
 
 
-class MultiViewClassifier(nn.Module):
-    def __init__(self, model_name="efficientnet_b3", dropout=0.4):
-        super().__init__()
+class MultiViewDataset(Dataset):
+    def __init__(self, df, image_root, transform=None, is_test=False):
+        self.df = df.reset_index(drop=True)
+        self.image_root = image_root
+        self.transform = transform
+        self.is_test = is_test
 
-        self.backbone = timm.create_model(
-            model_name,
-            pretrained=True,
-            num_classes=0,
-            global_pool="avg",
-        )
+    def __len__(self):
+        return len(self.df)
 
-        feature_dim = self.backbone.num_features
+    def _load_image(self, path):
+        image = cv2.imread(path)
+        if image is None:
+            raise FileNotFoundError(f"이미지를 찾을 수 없습니다: {path}")
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        return image
 
-        self.classifier = nn.Sequential(
-            nn.Linear(feature_dim * 2, 512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout),
+    def _label_to_float(self, label):
+        if isinstance(label, str):
+            label = label.strip().lower()
+            if label == "stable":
+                return 0.0
+            if label == "unstable":
+                return 1.0
+        return float(label)
 
-            nn.Linear(512, 128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout),
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+        sample_id = str(row["id"])
+        sample_dir = os.path.join(self.image_root, sample_id)
 
-            nn.Linear(128, 1),
-        )
+        front_path = os.path.join(sample_dir, "front.png")
+        top_path = os.path.join(sample_dir, "top.png")
 
-    def forward(self, views):
-        front_feat = self.backbone(views[0])
-        top_feat = self.backbone(views[1])
+        front_img = self._load_image(front_path)
+        top_img = self._load_image(top_path)
 
-        fused = torch.cat([front_feat, top_feat], dim=1)
-        logits = self.classifier(fused)
-        return logits
+        if self.transform is not None:
+            front_img = self.transform(image=front_img)["image"]
+            top_img = self.transform(image=top_img)["image"]
+
+        if self.is_test:
+            return [front_img, top_img]
+
+        label = torch.tensor(self._label_to_float(row["label"]), dtype=torch.float32)
+        return [front_img, top_img], label
