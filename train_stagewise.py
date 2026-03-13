@@ -17,7 +17,7 @@ from albumentations.pytorch import ToTensorV2
 
 from sklearn.metrics import log_loss, accuracy_score
 
-from configs.config_convnext import CFG, BASE_PATH, MODEL_PATH
+from configs.config import CFG, PRETRAIN_MODEL_PATH, FINETUNE_MODEL_PATH
 from src.dataset import MultiViewDataset
 from src.model_convnext import MultiViewConvNext
 
