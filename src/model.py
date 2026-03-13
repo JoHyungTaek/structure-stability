@@ -31,7 +31,33 @@ class MultiViewClassifier(nn.Module):
     def forward(self, views):
         front_feat = self.backbone(views[0])
         top_feat = self.backbone(views[1])
-
         fused = torch.cat([front_feat, top_feat], dim=1)
         logits = self.classifier(fused)
         return logits
+
+    def freeze_backbone(self):
+        for p in self.backbone.parameters():
+            p.requires_grad = False
+
+    def unfreeze_backbone(self):
+        for p in self.backbone.parameters():
+            p.requires_grad = True
+
+    def unfreeze_last_blocks(self, n_blocks=2):
+        for p in self.backbone.parameters():
+            p.requires_grad = False
+
+        # efficientnet 계열 기준
+        if hasattr(self.backbone, "blocks"):
+            blocks = list(self.backbone.blocks)
+            for block in blocks[-n_blocks:]:
+                for p in block.parameters():
+                    p.requires_grad = True
+
+        if hasattr(self.backbone, "conv_head"):
+            for p in self.backbone.conv_head.parameters():
+                p.requires_grad = True
+
+        if hasattr(self.backbone, "bn2"):
+            for p in self.backbone.bn2.parameters():
+                p.requires_grad = True

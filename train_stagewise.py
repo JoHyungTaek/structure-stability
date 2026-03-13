@@ -20,6 +20,7 @@ from sklearn.model_selection import StratifiedShuffleSplit
 from configs.config import (
     CFG,
     PRETRAIN_MODEL_PATH,
+    STAGE2_HEAD_MODEL_PATH,
     FINETUNE_MODEL_PATH,
 )
 from src.dataset import MultiViewDataset
@@ -29,7 +30,7 @@ from src.utils import seed_everything, label_to_int
 warnings.filterwarnings("ignore")
 
 
-def get_train_transform():
+def get_stage1_train_transform():
     size = CFG["IMG_SIZE"]
     return A.Compose([
         A.Resize(size, size),
@@ -47,6 +48,24 @@ def get_train_transform():
             p=0.5
         ),
         A.GaussNoise(p=0.2),
+        A.Normalize(
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225)
+        ),
+        ToTensorV2(),
+    ])
+
+
+def get_stage2_train_transform():
+    size = CFG["IMG_SIZE"]
+    return A.Compose([
+        A.Resize(size, size),
+        A.HorizontalFlip(p=0.3),
+        A.RandomBrightnessContrast(
+            brightness_limit=0.10,
+            contrast_limit=0.10,
+            p=0.3
+        ),
         A.Normalize(
             mean=(0.485, 0.456, 0.406),
             std=(0.229, 0.224, 0.225)
@@ -79,7 +98,7 @@ def build_stage1_loaders():
     train_dataset = MultiViewDataset(
         df=train_df,
         image_root=os.path.join(base_path, "train"),
-        transform=get_train_transform(),
+        transform=get_stage1_train_transform(),
         is_test=False,
     )
 
@@ -130,7 +149,7 @@ def build_stage2_loaders():
     train_dataset = MultiViewDataset(
         df=dev_train_df,
         image_root=os.path.join(base_path, "dev"),
-        transform=get_train_transform(),
+        transform=get_stage2_train_transform(),
         is_test=False,
     )
 
@@ -141,23 +160,19 @@ def build_stage2_loaders():
         is_test=False,
     )
 
-    train_loader = DataLoader(
+    return dev_train_df, dev_valid_df, DataLoader(
         train_dataset,
-        batch_size=CFG["STAGE2_BATCH_SIZE"],
+        batch_size=CFG["STAGE2_HEAD_BATCH_SIZE"],
         shuffle=True,
         num_workers=CFG["NUM_WORKERS"],
         pin_memory=True,
-    )
-
-    valid_loader = DataLoader(
+    ), DataLoader(
         valid_dataset,
-        batch_size=CFG["STAGE2_BATCH_SIZE"],
+        batch_size=CFG["STAGE2_HEAD_BATCH_SIZE"],
         shuffle=False,
         num_workers=CFG["NUM_WORKERS"],
         pin_memory=True,
     )
-
-    return train_loader, valid_loader
 
 
 def train_one_epoch(model, loader, criterion, optimizer, device, scaler):
@@ -227,8 +242,10 @@ def run_stage(
     device
 ):
     criterion = nn.BCEWithLogitsLoss()
+
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = optim.AdamW(
-        model.parameters(),
+        trainable_params,
         lr=lr,
         weight_decay=weight_decay
     )
@@ -282,7 +299,9 @@ def main():
         dropout=CFG["DROPOUT"]
     ).to(device)
 
+    # Stage1
     stage1_train_loader, stage1_valid_loader = build_stage1_loaders()
+    model.unfreeze_backbone()
     run_stage(
         model=model,
         train_loader=stage1_train_loader,
@@ -298,17 +317,36 @@ def main():
 
     model.load_state_dict(torch.load(PRETRAIN_MODEL_PATH, map_location=device))
 
-    stage2_train_loader, stage2_valid_loader = build_stage2_loaders()
+    # Stage2-A: head only
+    _, _, stage2_train_loader, stage2_valid_loader = build_stage2_loaders()
+    model.freeze_backbone()
+    run_stage(
+        model=model,
+        train_loader=stage2_train_loader,
+        valid_loader=stage2_valid_loader,
+        save_path=STAGE2_HEAD_MODEL_PATH,
+        epochs=CFG["STAGE2_HEAD_EPOCHS"],
+        lr=CFG["STAGE2_HEAD_LR"],
+        weight_decay=CFG["STAGE2_HEAD_WEIGHT_DECAY"],
+        patience=CFG["STAGE2_HEAD_PATIENCE"],
+        stage_name="Stage2A HeadOnly(dev-train->dev-val)",
+        device=device,
+    )
+
+    model.load_state_dict(torch.load(STAGE2_HEAD_MODEL_PATH, map_location=device))
+
+    # Stage2-B: last blocks only
+    model.unfreeze_last_blocks(CFG["UNFREEZE_LAST_N_BLOCKS"])
     run_stage(
         model=model,
         train_loader=stage2_train_loader,
         valid_loader=stage2_valid_loader,
         save_path=FINETUNE_MODEL_PATH,
-        epochs=CFG["STAGE2_EPOCHS"],
-        lr=CFG["STAGE2_LR"],
-        weight_decay=CFG["STAGE2_WEIGHT_DECAY"],
-        patience=CFG["STAGE2_PATIENCE"],
-        stage_name="Stage2 Finetune(dev-train->dev-val)",
+        epochs=CFG["STAGE2_FINE_EPOCHS"],
+        lr=CFG["STAGE2_FINE_LR"],
+        weight_decay=CFG["STAGE2_FINE_WEIGHT_DECAY"],
+        patience=CFG["STAGE2_FINE_PATIENCE"],
+        stage_name="Stage2B LastBlocks(dev-train->dev-val)",
         device=device,
     )
 
