@@ -2,8 +2,18 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 
-def build_train_transform(cfg):
-    image_size = cfg["model"]["image_size"]
+def _normalize_and_tensor():
+    return [
+        A.Normalize(
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225),
+        ),
+        ToTensorV2(),
+    ]
+
+
+# train.py가 build_train_transform(image_size, cfg) 형태로 호출하므로 여기에 맞춤
+def build_train_transform(image_size, cfg):
     aug_cfg = cfg["augment"]
 
     return A.Compose([
@@ -39,30 +49,20 @@ def build_train_transform(cfg):
             p=aug_cfg["coarse_dropout"],
         ),
 
-        A.Normalize(
-            mean=(0.485, 0.456, 0.406),
-            std=(0.229, 0.224, 0.225),
-        ),
-        ToTensorV2(),
+        *_normalize_and_tensor(),
     ])
 
 
-def build_valid_transform(cfg):
-    image_size = cfg["model"]["image_size"]
-
+# train.py / inference.py가 build_valid_transform(image_size) 형태로 호출하므로 여기에 맞춤
+def build_valid_transform(image_size):
     return A.Compose([
         A.Resize(image_size, image_size),
-        A.Normalize(
-            mean=(0.485, 0.456, 0.406),
-            std=(0.229, 0.224, 0.225),
-        ),
-        ToTensorV2(),
+        *_normalize_and_tensor(),
     ])
 
 
-def build_tta_transform(cfg, tta_name="none"):
-    image_size = cfg["model"]["image_size"]
-
+# 나중에 inference 쪽 TTA에서 쓸 수 있게 같이 맞춰둠
+def build_tta_transform(image_size, tta_name="none"):
     transforms = [
         A.Resize(image_size, image_size),
     ]
@@ -70,25 +70,18 @@ def build_tta_transform(cfg, tta_name="none"):
     if tta_name == "hflip":
         transforms.append(A.HorizontalFlip(p=1.0))
 
-    transforms.extend([
-        A.Normalize(
-            mean=(0.485, 0.456, 0.406),
-            std=(0.229, 0.224, 0.225),
-        ),
-        ToTensorV2(),
-    ])
-
+    transforms.extend(_normalize_and_tensor())
     return A.Compose(transforms)
 
 
 # 호환용 alias
 def build_train_transforms(cfg):
-    return build_train_transform(cfg)
+    return build_train_transform(cfg["model"]["image_size"], cfg)
 
 
 def build_valid_transforms(cfg):
-    return build_valid_transform(cfg)
+    return build_valid_transform(cfg["model"]["image_size"])
 
 
 def build_tta_transforms(cfg, tta_name="none"):
-    return build_tta_transform(cfg, tta_name)
+    return build_tta_transform(cfg["model"]["image_size"], tta_name)
