@@ -3,12 +3,12 @@ num_workers: 2
 device: cuda
 
 paths:
-  data_root: ./open
-  output_root: ./outputs/max001
-  motion_csv: ./open/motion_targets.csv
+  data_root: /content/drive/MyDrive/데이콘/open
+  output_root: /content/drive/MyDrive/structure_outputs
+  motion_csv: /content/drive/MyDrive/데이콘/open/motion_targets.csv
 
 model:
-  backbone: convnextv2_base.fcmae_ft_in22k_in1k
+  backbone: convnextv2_tiny.fcmae_ft_in22k_in1k
   image_size: 384
   hidden_dim: 384
   geom_dim: 17
@@ -18,11 +18,11 @@ model:
 
 train:
   n_folds: 5
-  epochs: 14
-  batch_size: 6
-  lr: 0.00008
-  weight_decay: 0.0001
-  min_lr: 0.000001
+  epochs: 12
+  batch_size: 8
+  lr: 8.0e-5
+  weight_decay: 1.0e-4
+  min_lr: 1.0e-6
   grad_accum_steps: 2
   mixed_precision: true
   gradient_clip: 1.0
@@ -33,6 +33,8 @@ train:
   aux_motion_weight: 0.18
   aux_onset_weight: 0.08
   aux_severity_weight: 0.08
+  image_size: 384
+  num_workers: 2
 
 augment:
   hflip: 0.5
@@ -42,5 +44,5 @@ augment:
 
 infer:
   batch_size: 12
-  tta: [none, hflip]
-  checkpoint_glob: fold*_best.pt
+  tta: ["none", "hflip"]
+  checkpoint_glob: "fold*_best.pt"
