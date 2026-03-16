@@ -1,4 +1,3 @@
-import math
 import numpy as np
 import torch
 import torch.nn as nn
@@ -24,6 +23,29 @@ class AverageMeter:
         self.count += n
 
 
+class BinarySmoothBCE(nn.Module):
+    def __init__(self, smoothing=0.0, pos_weight=None):
+        super().__init__()
+        self.smoothing = float(smoothing)
+        if pos_weight is not None:
+            self.register_buffer("pos_weight", torch.tensor([pos_weight], dtype=torch.float32))
+        else:
+            self.pos_weight = None
+
+    def forward(self, logits, targets):
+        targets = targets.float()
+        if self.smoothing > 0:
+            targets = targets * (1.0 - self.smoothing) + 0.5 * self.smoothing
+
+        if self.pos_weight is not None:
+            return F.binary_cross_entropy_with_logits(
+                logits,
+                targets,
+                pos_weight=self.pos_weight.to(logits.device),
+            )
+        return F.binary_cross_entropy_with_logits(logits, targets)
+
+
 class TemperatureScaler(nn.Module):
     def __init__(self):
         super().__init__()
@@ -34,8 +56,6 @@ class TemperatureScaler(nn.Module):
 
     def fit(self, logits, targets, device="cuda"):
         device = torch.device(device)
-
-        # 핵심: logits / targets / module 전부 같은 device로 이동
         self.to(device)
 
         logits_t = torch.tensor(logits, dtype=torch.float32, device=device)
@@ -54,12 +74,21 @@ class TemperatureScaler(nn.Module):
         return float(self.temperature.detach().cpu().item())
 
 
-def binary_logloss_from_logits(logits, targets):
-    probs = torch.sigmoid(torch.tensor(logits)).numpy()
-    return log_loss(targets, probs, labels=[0, 1])
+def _prob_from_logits(logits):
+    return 1.0 / (1.0 + np.exp(-logits))
 
 
-def train_one_epoch(model, loader, optimizer, scheduler, device, mixed_precision=True, grad_accum_steps=1, gradient_clip=1.0):
+def run_train_epoch(
+    model,
+    loader,
+    optimizer,
+    scheduler,
+    criterion,
+    device,
+    mixed_precision=True,
+    grad_accum_steps=1,
+    gradient_clip=1.0,
+):
     model.train()
     meter = AverageMeter()
 
@@ -78,8 +107,7 @@ def train_one_epoch(model, loader, optimizer, scheduler, device, mixed_precision
 
         with torch.amp.autocast("cuda", enabled=mixed_precision):
             logits = model(front, top).squeeze(1)
-            loss = F.binary_cross_entropy_with_logits(logits, target)
-            loss = loss / grad_accum_steps
+            loss = criterion(logits, target) / grad_accum_steps
 
         scaler.scale(loss).backward()
 
@@ -92,29 +120,27 @@ def train_one_epoch(model, loader, optimizer, scheduler, device, mixed_precision
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
 
-            # 핵심: optimizer.step() 이후 scheduler.step()
             if scheduler is not None:
                 scheduler.step()
 
         meter.update(loss.item() * grad_accum_steps, front.size(0))
-
         all_logits.append(logits.detach().cpu())
         all_targets.append(target.detach().cpu())
 
     all_logits = torch.cat(all_logits).numpy()
     all_targets = torch.cat(all_targets).numpy()
-    ll = log_loss(all_targets, 1 / (1 + np.exp(-all_logits)), labels=[0, 1])
+    ll = log_loss(all_targets, _prob_from_logits(all_logits), labels=[0, 1])
 
     return {
         "loss": meter.avg,
         "logloss": ll,
         "logits": all_logits,
-        "targets": all_targets,
+        "y_true": all_targets,
     }
 
 
 @torch.no_grad()
-def valid_one_epoch(model, loader, device):
+def run_valid_epoch(model, loader, criterion, device):
     model.eval()
     meter = AverageMeter()
 
@@ -127,20 +153,19 @@ def valid_one_epoch(model, loader, device):
         target = batch["target"].float().to(device, non_blocking=True)
 
         logits = model(front, top).squeeze(1)
-        loss = F.binary_cross_entropy_with_logits(logits, target)
+        loss = criterion(logits, target)
 
         meter.update(loss.item(), front.size(0))
-
         all_logits.append(logits.detach().cpu())
         all_targets.append(target.detach().cpu())
 
     all_logits = torch.cat(all_logits).numpy()
     all_targets = torch.cat(all_targets).numpy()
-    ll = log_loss(all_targets, 1 / (1 + np.exp(-all_logits)), labels=[0, 1])
+    ll = log_loss(all_targets, _prob_from_logits(all_logits), labels=[0, 1])
 
     return {
         "loss": meter.avg,
         "logloss": ll,
         "logits": all_logits,
-        "targets": all_targets,
+        "y_true": all_targets,
     }
