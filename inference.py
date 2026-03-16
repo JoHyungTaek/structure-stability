@@ -84,8 +84,15 @@ def main():
         dropout=CFG["DROPOUT"]
     ).to(device)
 
-    model.load_state_dict(torch.load(PRETRAIN_MODEL_PATH, map_location=device))
-    print(f"Loaded model -> {PRETRAIN_MODEL_PATH}")
+    ckpt = torch.load(ckpt_path, map_location=device)
+
+    if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+        state_dict = ckpt["model_state_dict"]
+    else:
+        state_dict = ckpt
+
+    model.load_state_dict(state_dict, strict=True)
+    print(f"Loaded model -> {ckpt_path}")
 
     loader_org = make_test_loader(sample_sub, get_test_transform())
     preds_org = predict(model, loader_org, device)
