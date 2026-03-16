@@ -1,61 +1,81 @@
-from __future__ import annotations
-
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 
-def build_train_transform(image_size: int, cfg: dict) -> A.Compose:
-    aug = cfg.get("augment", {})
-    return A.Compose(
-        [
-            A.Resize(image_size, image_size),
-            A.HorizontalFlip(p=aug.get("hflip", 0.5)),
-            A.ShiftScaleRotate(
-                shift_limit=0.05,
-                scale_limit=0.08,
-                rotate_limit=10,
-                border_mode=0,
-                p=aug.get("shift_scale_rotate", 0.5),
-            ),
-            A.OneOf(
-                [
-                    A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-                    A.RandomBrightnessContrast(brightness_limit=0.15, contrast_limit=0.15),
-                    A.CLAHE(clip_limit=2.0),
-                ],
-                p=aug.get("color_jitter", 0.4),
-            ),
-            A.OneOf(
-                [A.MotionBlur(blur_limit=3), A.GaussianBlur(blur_limit=(3, 5)), A.MedianBlur(blur_limit=3)],
-                p=aug.get("blur", 0.15),
-            ),
-            A.CoarseDropout(
-                max_holes=8,
-                max_height=int(image_size * 0.08),
-                max_width=int(image_size * 0.08),
-                min_holes=1,
-                fill_value=0,
-                p=aug.get("coarse_dropout", 0.2),
-            ),
-            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            ToTensorV2(),
-        ]
-    )
+def build_train_transforms(cfg):
+    image_size = cfg["model"]["image_size"]
+    aug_cfg = cfg["augment"]
+
+    return A.Compose([
+        A.Resize(image_size, image_size),
+
+        A.HorizontalFlip(p=aug_cfg["hflip"]),
+
+        A.ColorJitter(
+            brightness=aug_cfg["color_jitter"],
+            contrast=aug_cfg["color_jitter"],
+            saturation=aug_cfg["color_jitter"],
+            hue=min(0.1, aug_cfg["color_jitter"] / 4),
+            p=0.6,
+        ),
+
+        A.OneOf([
+            A.GaussianBlur(blur_limit=(3, 5), p=1.0),
+            A.MotionBlur(blur_limit=(3, 5), p=1.0),
+        ], p=aug_cfg["blur"]),
+
+        A.Affine(
+            scale=(0.9, 1.1),
+            translate_percent=(-0.05, 0.05),
+            rotate=(-12, 12),
+            p=aug_cfg["shift_scale_rotate"],
+        ),
+
+        A.CoarseDropout(
+            num_holes_range=(1, 4),
+            hole_height_range=(0.05, 0.15),
+            hole_width_range=(0.05, 0.15),
+            fill=0,
+            p=aug_cfg["coarse_dropout"],
+        ),
+
+        A.Normalize(
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225),
+        ),
+        ToTensorV2(),
+    ])
 
 
-def build_valid_transform(image_size: int) -> A.Compose:
-    return A.Compose(
-        [
-            A.Resize(image_size, image_size),
-            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            ToTensorV2(),
-        ]
-    )
+def build_valid_transforms(cfg):
+    image_size = cfg["model"]["image_size"]
+
+    return A.Compose([
+        A.Resize(image_size, image_size),
+        A.Normalize(
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225),
+        ),
+        ToTensorV2(),
+    ])
 
 
-def apply_tta(front, top, mode: str):
-    if mode == "none":
-        return front, top
-    if mode == "hflip":
-        return front.flip(-1), top.flip(-1)
-    raise ValueError(f"Unsupported TTA mode: {mode}")
+def build_tta_transforms(cfg, tta_name="none"):
+    image_size = cfg["model"]["image_size"]
+
+    transforms = [
+        A.Resize(image_size, image_size),
+    ]
+
+    if tta_name == "hflip":
+        transforms.append(A.HorizontalFlip(p=1.0))
+
+    transforms.extend([
+        A.Normalize(
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225),
+        ),
+        ToTensorV2(),
+    ])
+
+    return A.Compose(transforms)

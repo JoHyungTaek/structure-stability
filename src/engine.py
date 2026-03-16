@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -82,8 +84,8 @@ def run_train_epoch(
     model,
     loader,
     optimizer,
-    scheduler,
     criterion,
+    scheduler,
     device,
     mixed_precision=True,
     grad_accum_steps=1,
@@ -106,7 +108,7 @@ def run_train_epoch(
         target = batch["target"].float().to(device, non_blocking=True)
 
         with torch.amp.autocast("cuda", enabled=mixed_precision):
-            logits = model(front, top).squeeze(1)
+            logits = model(front, top)   # 여기서 squeeze(1) 제거
             loss = criterion(logits, target) / grad_accum_steps
 
         scaler.scale(loss).backward()
@@ -131,12 +133,12 @@ def run_train_epoch(
     all_targets = torch.cat(all_targets).numpy()
     ll = log_loss(all_targets, _prob_from_logits(all_logits), labels=[0, 1])
 
-    return {
-        "loss": meter.avg,
-        "logloss": ll,
-        "logits": all_logits,
-        "y_true": all_targets,
-    }
+    return SimpleNamespace(
+        loss=meter.avg,
+        logloss=ll,
+        logits=all_logits,
+        y_true=all_targets,
+    )
 
 
 @torch.no_grad()
@@ -152,7 +154,7 @@ def run_valid_epoch(model, loader, criterion, device):
         top = batch["top"].to(device, non_blocking=True)
         target = batch["target"].float().to(device, non_blocking=True)
 
-        logits = model(front, top).squeeze(1)
+        logits = model(front, top)   # 여기서도 squeeze(1) 제거
         loss = criterion(logits, target)
 
         meter.update(loss.item(), front.size(0))
@@ -163,9 +165,10 @@ def run_valid_epoch(model, loader, criterion, device):
     all_targets = torch.cat(all_targets).numpy()
     ll = log_loss(all_targets, _prob_from_logits(all_logits), labels=[0, 1])
 
-    return {
-        "loss": meter.avg,
-        "logloss": ll,
-        "logits": all_logits,
-        "y_true": all_targets,
-    }
+    result = SimpleNamespace(
+        loss=meter.avg,
+        logloss=ll,
+        logits=all_logits,
+        y_true=all_targets,
+    )
+    return result, all_logits
