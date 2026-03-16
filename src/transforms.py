@@ -2,7 +2,7 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 
-def build_train_transforms(cfg):
+def build_train_transform(cfg):
     image_size = cfg["model"]["image_size"]
     aug_cfg = cfg["augment"]
 
@@ -47,7 +47,7 @@ def build_train_transforms(cfg):
     ])
 
 
-def build_valid_transforms(cfg):
+def build_valid_transform(cfg):
     image_size = cfg["model"]["image_size"]
 
     return A.Compose([
@@ -60,7 +60,7 @@ def build_valid_transforms(cfg):
     ])
 
 
-def build_tta_transforms(cfg, tta_name="none"):
+def build_tta_transform(cfg, tta_name="none"):
     image_size = cfg["model"]["image_size"]
 
     transforms = [
@@ -79,3 +79,16 @@ def build_tta_transforms(cfg, tta_name="none"):
     ])
 
     return A.Compose(transforms)
+
+
+# 호환용 alias
+def build_train_transforms(cfg):
+    return build_train_transform(cfg)
+
+
+def build_valid_transforms(cfg):
+    return build_valid_transform(cfg)
+
+
+def build_tta_transforms(cfg, tta_name="none"):
+    return build_tta_transform(cfg, tta_name)
