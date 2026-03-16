@@ -2,9 +2,9 @@ torch
 torchvision
 timm
 albumentations
-opencv-python-headless
+opencv-python
 pandas
 numpy
 scikit-learn
+pyyaml
 tqdm
-Pillow

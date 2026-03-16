@@ -1,63 +1,53 @@
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import timm
 
 
 class MultiViewClassifier(nn.Module):
-    def __init__(self, model_name="efficientnet_b3", dropout=0.4):
+    def __init__(
+        self,
+        model_name: str = "convnextv2_tiny.fcmae_ft_in22k_in1k",
+        pretrained: bool = True,
+        dropout: float = 0.25,
+    ) -> None:
         super().__init__()
-
         self.backbone = timm.create_model(
             model_name,
-            pretrained=True,
+            pretrained=pretrained,
             num_classes=0,
             global_pool="avg",
         )
+        feat_dim = self.backbone.num_features
+        hidden_dim = max(256, feat_dim // 2)
 
-        feature_dim = self.backbone.num_features
-
-        self.classifier = nn.Sequential(
-            nn.Linear(feature_dim * 2, 512),
-            nn.ReLU(inplace=True),
+        self.head = nn.Sequential(
+            nn.Linear(feat_dim * 4, hidden_dim),
+            nn.GELU(),
             nn.Dropout(dropout),
-
-            nn.Linear(512, 128),
-            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.GELU(),
             nn.Dropout(dropout),
-
-            nn.Linear(128, 1),
+            nn.Linear(hidden_dim // 2, 1),
         )
 
-    def forward(self, views):
-        front_feat = self.backbone(views[0])
-        top_feat = self.backbone(views[1])
-        fused = torch.cat([front_feat, top_feat], dim=1)
-        logits = self.classifier(fused)
+    def encode(self, image: torch.Tensor) -> torch.Tensor:
+        return self.backbone(image)
+
+    def forward(self, front: torch.Tensor, top: torch.Tensor) -> torch.Tensor:
+        front_feat = self.encode(front)
+        top_feat = self.encode(top)
+        diff_feat = torch.abs(front_feat - top_feat)
+        prod_feat = front_feat * top_feat
+        fused = torch.cat([front_feat, top_feat, diff_feat, prod_feat], dim=1)
+        logits = self.head(fused).squeeze(1)
         return logits
 
-    def freeze_backbone(self):
-        for p in self.backbone.parameters():
-            p.requires_grad = False
+    def freeze_backbone(self) -> None:
+        for param in self.backbone.parameters():
+            param.requires_grad = False
 
-    def unfreeze_backbone(self):
-        for p in self.backbone.parameters():
-            p.requires_grad = True
-
-    def unfreeze_last_blocks(self, n_blocks=2):
-        for p in self.backbone.parameters():
-            p.requires_grad = False
-
-        # efficientnet 계열 기준
-        if hasattr(self.backbone, "blocks"):
-            blocks = list(self.backbone.blocks)
-            for block in blocks[-n_blocks:]:
-                for p in block.parameters():
-                    p.requires_grad = True
-
-        if hasattr(self.backbone, "conv_head"):
-            for p in self.backbone.conv_head.parameters():
-                p.requires_grad = True
-
-        if hasattr(self.backbone, "bn2"):
-            for p in self.backbone.bn2.parameters():
-                p.requires_grad = True
+    def unfreeze_backbone(self) -> None:
+        for param in self.backbone.parameters():
+            param.requires_grad = True
