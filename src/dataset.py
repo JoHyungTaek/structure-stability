@@ -1,132 +1,95 @@
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import cv2
-import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
 
-@dataclass
-class DatasetSpec:
-    csv_path: Path
-    image_root: Path
-    split_name: str
+LABEL_MAP = {"unstable": 1, "stable": 0, 1: 1, 0: 0, "1": 1, "0": 0}
 
 
-class MultiViewDataset(Dataset):
-    def __init__(
-        self,
-        df: pd.DataFrame,
-        image_root: str | Path,
-        transform=None,
-        is_test: bool = False,
-    ) -> None:
-        self.df = df.reset_index(drop=True).copy()
-        self.image_root = Path(image_root)
+def _find_csv(data_root: Path, filename: str) -> Path:
+    path = data_root / filename
+    if path.exists():
+        return path
+    raise FileNotFoundError(f"Missing required file: {path}")
+
+
+def _normalize_label(v):
+    if pd.isna(v):
+        return None
+    if v in LABEL_MAP:
+        return LABEL_MAP[v]
+    if isinstance(v, str):
+        v = v.strip().lower()
+        if v in LABEL_MAP:
+            return LABEL_MAP[v]
+    raise ValueError(f"Unknown label value: {v}")
+
+
+def load_split_dataframe(data_root: str | Path, split: str) -> pd.DataFrame:
+    data_root = Path(data_root)
+    if split == "train":
+        df = pd.read_csv(_find_csv(data_root, "train.csv"))
+        df["split"] = "train"
+    elif split == "dev":
+        df = pd.read_csv(_find_csv(data_root, "dev.csv"))
+        df["split"] = "dev"
+    elif split == "test":
+        df = pd.read_csv(_find_csv(data_root, "sample_submission.csv"))
+        df = df[["id"]].copy()
+        df["split"] = "test"
+    else:
+        raise ValueError(split)
+
+    df["id"] = df["id"].astype(str)
+    if "label" in df.columns:
+        df["target"] = df["label"].apply(_normalize_label)
+    else:
+        df["target"] = None
+    df["front_path"] = df["id"].apply(lambda x: str(data_root / split / x / "front.png"))
+    df["top_path"] = df["id"].apply(lambda x: str(data_root / split / x / "top.png"))
+    df["video_path"] = df["id"].apply(lambda x: str(data_root / split / x / "simulation.mp4"))
+    return df
+
+
+class StructureDataset(Dataset):
+    def __init__(self, df: pd.DataFrame, transform=None, test_mode: bool = False):
+        self.df = df.reset_index(drop=True)
         self.transform = transform
-        self.is_test = is_test
-        self.id_col = self._find_id_col()
-        self.label_col = None if is_test else self._find_label_col()
+        self.test_mode = test_mode
 
-    def _find_id_col(self) -> str:
-        cols = list(self.df.columns)
-        lower_map = {c.lower(): c for c in cols}
-        for cand in ["id", "sample_id"]:
-            if cand in lower_map:
-                return lower_map[cand]
-        return cols[0]
-
-    def _find_label_col(self) -> str:
-        cols = list(self.df.columns)
-        lower_map = {c.lower(): c for c in cols}
-        for cand in ["label", "target", "unstable"]:
-            if cand in lower_map:
-                return lower_map[cand]
-        for c in cols:
-            if c != self.id_col:
-                return c
-        raise ValueError("No label column found")
-
-    def __len__(self) -> int:
+    def __len__(self):
         return len(self.df)
 
     @staticmethod
-    def _label_to_float(label) -> float:
-        if isinstance(label, str):
-            value = label.strip().lower()
-            if value == "stable":
-                return 0.0
-            if value == "unstable":
-                return 1.0
-        return float(label)
-
-    @staticmethod
-    def _load_image(path: str | Path) -> np.ndarray:
-        image = cv2.imread(str(path))
-        if image is None:
-            raise FileNotFoundError(f"Image not found: {path}")
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        return image
-
-    def _resolve_paths(self, sample_id: str) -> tuple[Path, Path]:
-        front_path = self.image_root / sample_id / "front.png"
-        top_path = self.image_root / sample_id / "top.png"
-        return front_path, top_path
+    def _read_image(path: str):
+        img = cv2.imread(path, cv2.IMREAD_COLOR)
+        if img is None:
+            raise FileNotFoundError(path)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        return img
 
     def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
-        sample_id = str(row[self.id_col])
-        front_path, top_path = self._resolve_paths(sample_id)
-
-        front_img = self._load_image(front_path)
-        top_img = self._load_image(top_path)
+        front = self._read_image(row.front_path)
+        top = self._read_image(row.top_path)
 
         if self.transform is not None:
-            front_img = self.transform(image=front_img)["image"]
-            top_img = self.transform(image=top_img)["image"]
+            front = self.transform(image=front)["image"]
+            top = self.transform(image=top)["image"]
+        else:
+            raise ValueError("transform is required")
 
-        item = {
-            "id": sample_id,
-            "front": front_img,
-            "top": top_img,
+        sample = {
+            "id": row.id,
+            "front": front,
+            "top": top,
         }
-
-        if not self.is_test:
-            label = self._label_to_float(row[self.label_col])
-            item["target"] = torch.tensor(label, dtype=torch.float32)
-
-        return item
-
-
-def build_dataset_specs(cfg: dict) -> dict[str, DatasetSpec]:
-    root = Path(cfg["paths"]["data_root"])
-    specs = {
-        "train": DatasetSpec(
-            csv_path=root / cfg["paths"]["train_csv"],
-            image_root=root / cfg["paths"]["train_image_dir"],
-            split_name="train",
-        ),
-        "dev": DatasetSpec(
-            csv_path=root / cfg["paths"]["dev_csv"],
-            image_root=root / cfg["paths"]["dev_image_dir"],
-            split_name="dev",
-        ),
-        "test": DatasetSpec(
-            csv_path=root / cfg["paths"]["test_csv"],
-            image_root=root / cfg["paths"]["test_image_dir"],
-            split_name="test",
-        ),
-    }
-    return specs
-
-
-def read_split_dataframe(spec: DatasetSpec) -> pd.DataFrame:
-    if not spec.csv_path.exists():
-        raise FileNotFoundError(f"CSV not found: {spec.csv_path}")
-    return pd.read_csv(spec.csv_path)
+        if not self.test_mode:
+            sample["target"] = torch.tensor(float(row.target), dtype=torch.float32)
+        return sample

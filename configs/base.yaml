@@ -1,69 +1,43 @@
-project_name: structure-stability
 seed: 42
 num_workers: 2
-use_amp: true
-print_freq: 20
+device: cuda
 
 paths:
-  data_root: /content/drive/MyDrive/dacon_structure_stability
-  train_csv: train.csv
-  dev_csv: dev.csv
-  test_csv: test.csv
-  sample_submission_csv: sample_submission.csv
-  train_image_dir: train
-  dev_image_dir: dev
-  test_image_dir: test
-  output_root: /content/drive/MyDrive/structure_outputs
-
-train:
-  stage1_epochs: 8
-  stage2_epochs: 6
-  batch_size: 16
-  grad_accum_steps: 1
-  lr: 0.00015
-  encoder_lr: 0.00008
-  weight_decay: 0.0001
-  max_grad_norm: 5.0
-  label_smoothing: 0.0
-  pos_weight: null
-  freeze_backbone_epochs: 1
-  folds: 5
-  dev_folds: 5
-  train_on_dev_ratio: 1.0
-  scheduler:
-    name: cosine
-    warmup_ratio: 0.1
-    min_lr: 1.0e-6
-  early_stopping_patience: 3
+  data_root: ./open
+  output_root: ./outputs/exp001
 
 model:
-  name: convnextv2_tiny.fcmae_ft_in22k_in1k
+  backbone: convnextv2_tiny.fcmae_ft_in22k_in1k
   image_size: 320
+  hidden_dim: 256
   dropout: 0.25
   pretrained: true
-  pooling: avg
-  use_metadata_head: false
+  attention_heads: 8
+
+train:
+  n_folds: 5
+  epochs: 12
+  batch_size: 12
+  lr: 0.00015
+  weight_decay: 0.00005
+  min_lr: 0.000001
+  warmup_epochs: 1
+  grad_accum_steps: 1
+  mixed_precision: true
+  gradient_clip: 1.0
+  label_smoothing: 0.02
+  pos_weight: 1.0
+  use_dev: true
+  early_stopping: 4
 
 augment:
-  train:
-    horizontal_flip: 0.5
-    vertical_flip: 0.1
-    color_jitter: 0.5
-    blur: 0.15
-    noise: 0.15
-    rotate_limit: 8
-    shift_limit: 0.04
-    scale_limit: 0.08
-    coarse_dropout: 0.15
-  valid:
-    tta_hflip: true
-    tta_vflip: false
+  hflip: 0.5
+  color_jitter: 0.4
+  coarse_dropout: 0.2
+  blur: 0.15
+  shift_scale_rotate: 0.5
 
-loss:
-  bce_weight: 1.0
-  aux_weight: 0.0
-
-inference:
-  use_tta: true
-  temperature_scaling: true
-  blend_weights: null
+infer:
+  batch_size: 16
+  tta: [none, hflip]
+  checkpoint_glob: fold*_best.pt

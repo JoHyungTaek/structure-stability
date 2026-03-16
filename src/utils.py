@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import ast
 import json
-import math
 import os
 import random
+from copy import deepcopy
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Any, Dict, Iterable, List
 
 import numpy as np
 import torch
-from sklearn.metrics import log_loss
+import yaml
 
 
 class AverageMeter:
@@ -18,13 +19,13 @@ class AverageMeter:
 
     def reset(self) -> None:
         self.val = 0.0
-        self.avg = 0.0
         self.sum = 0.0
         self.count = 0
+        self.avg = 0.0
 
     def update(self, val: float, n: int = 1) -> None:
-        self.val = val
-        self.sum += val * n
+        self.val = float(val)
+        self.sum += float(val) * n
         self.count += n
         self.avg = self.sum / max(self.count, 1)
 
@@ -40,100 +41,71 @@ def seed_everything(seed: int) -> None:
     torch.backends.cudnn.benchmark = False
 
 
-def ensure_dir(path: str | Path) -> Path:
-    p = Path(path)
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+def load_yaml(path: str | Path) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
 
-def save_json(obj: Dict, path: str | Path) -> None:
+def save_yaml(path: str | Path, obj: Dict[str, Any]) -> None:
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, indent=2, ensure_ascii=False)
+        yaml.safe_dump(obj, f, allow_unicode=True, sort_keys=False)
 
 
-def sigmoid_np(x: np.ndarray) -> np.ndarray:
-    return 1.0 / (1.0 + np.exp(-x))
+def save_json(path: str | Path, obj: Dict[str, Any]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
 
 
-def compute_binary_logloss(y_true: Iterable[float], y_pred: Iterable[float]) -> float:
-    y_true = np.asarray(list(y_true), dtype=np.float32)
-    y_pred = np.asarray(list(y_pred), dtype=np.float32)
-    y_pred = np.clip(y_pred, 1e-6, 1 - 1e-6)
-    return float(log_loss(y_true, y_pred, labels=[0, 1]))
+def load_json(path: str | Path) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def infer_submission_columns(df) -> tuple[str, str | None]:
-    cols = list(df.columns)
-    lower_map = {c.lower(): c for c in cols}
-
-    id_candidates = ["id", "sample_id"]
-    id_col = None
-    for cand in id_candidates:
-        if cand in lower_map:
-            id_col = lower_map[cand]
-            break
-    if id_col is None:
-        id_col = cols[0]
-
-    prob_candidates = [
-        "unstable",
-        "probability",
-        "target",
-        "label",
-        "score",
-        "prediction",
-    ]
-    pred_col = None
-    for cand in prob_candidates:
-        if cand in lower_map:
-            pred_col = lower_map[cand]
-            break
-
-    if pred_col is None:
-        remaining = [c for c in cols if c != id_col]
-        pred_col = remaining[0] if remaining else None
-
-    return id_col, pred_col
+def ensure_dir(path: str | Path) -> Path:
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
-def get_device() -> torch.device:
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def _parse_value(raw: str) -> Any:
+    lowered = raw.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered == "none":
+        return None
+    try:
+        return ast.literal_eval(raw)
+    except Exception:
+        return raw
 
 
-def build_run_name(cfg: Dict, suffix: str = "") -> str:
-    model_name = cfg["model"]["name"].split(".")[0]
-    img_size = cfg["model"]["image_size"]
-    seed = cfg["seed"]
-    base = f"{model_name}_img{img_size}_seed{seed}"
-    return f"{base}_{suffix}" if suffix else base
+def apply_overrides(cfg: Dict[str, Any], overrides: Iterable[str] | None) -> Dict[str, Any]:
+    cfg = deepcopy(cfg)
+    if overrides is None:
+        return cfg
+    for item in overrides:
+        if "=" not in item:
+            raise ValueError(f"override must be key=value: {item}")
+        key, value = item.split("=", 1)
+        value = _parse_value(value)
+        cur = cfg
+        parts = key.split(".")
+        for p in parts[:-1]:
+            if p not in cur or not isinstance(cur[p], dict):
+                cur[p] = {}
+            cur = cur[p]
+        cur[parts[-1]] = value
+    return cfg
 
 
-def cosine_warmup_lr_lambda(current_step: int, total_steps: int, warmup_steps: int, min_ratio: float) -> float:
-    if total_steps <= 0:
-        return 1.0
-    if current_step < warmup_steps:
-        return float(current_step) / max(1, warmup_steps)
-    progress = float(current_step - warmup_steps) / max(1, total_steps - warmup_steps)
-    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
-    return min_ratio + (1.0 - min_ratio) * cosine
-
-
-def load_checkpoint(model: torch.nn.Module, checkpoint_path: str | Path, device: torch.device) -> Dict:
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    state_dict = checkpoint.get("model", checkpoint)
-    model.load_state_dict(state_dict, strict=True)
-    return checkpoint
-
-
-def save_checkpoint(state: Dict, checkpoint_path: str | Path) -> None:
-    torch.save(state, checkpoint_path)
-
-
-def to_python_float(value) -> float:
-    if isinstance(value, torch.Tensor):
-        return float(value.detach().cpu().item())
-    return float(value)
-
-
-def mean_of_list(values: List[float]) -> float:
-    return float(sum(values) / max(len(values), 1))
+def flatten_dict(d: Dict[str, Any], prefix: str = "") -> List[str]:
+    rows: List[str] = []
+    for k, v in d.items():
+        name = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            rows.extend(flatten_dict(v, name))
+        else:
+            rows.append(f"{name}: {v}")
+    return rows
