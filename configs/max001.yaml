@@ -1,0 +1,46 @@
+seed: 42
+num_workers: 2
+device: cuda
+
+paths:
+  data_root: ./open
+  output_root: ./outputs/max001
+  motion_csv: ./open/motion_targets.csv
+
+model:
+  backbone: convnextv2_base.fcmae_ft_in22k_in1k
+  image_size: 384
+  hidden_dim: 384
+  geom_dim: 17
+  dropout: 0.25
+  pretrained: true
+  attention_heads: 8
+
+train:
+  n_folds: 5
+  epochs: 14
+  batch_size: 6
+  lr: 0.00008
+  weight_decay: 0.0001
+  min_lr: 0.000001
+  grad_accum_steps: 2
+  mixed_precision: true
+  gradient_clip: 1.0
+  use_dev: true
+  early_stopping: 4
+  extract_motion: true
+  group_clusters: 24
+  aux_motion_weight: 0.18
+  aux_onset_weight: 0.08
+  aux_severity_weight: 0.08
+
+augment:
+  hflip: 0.5
+  coarse_dropout: 0.12
+  blur: 0.18
+  shift_scale_rotate: 0.55
+
+infer:
+  batch_size: 12
+  tta: [none, hflip]
+  checkpoint_glob: fold*_best.pt
