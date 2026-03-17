@@ -4,40 +4,41 @@ device: cuda
 
 paths:
   data_root: ./open
-  output_root: ./outputs/exp001
+  output_root: ./outputs/exp002_group384
 
 model:
   backbone: convnextv2_tiny.fcmae_ft_in22k_in1k
-  image_size: 320
-  hidden_dim: 256
+  image_size: 384
+  hidden_dim: 320
   dropout: 0.25
   pretrained: true
   attention_heads: 8
 
 train:
   n_folds: 5
-  epochs: 12
-  batch_size: 12
-  lr: 0.00015
-  weight_decay: 0.00005
+  epochs: 14
+  batch_size: 8
+  lr: 0.00008
+  weight_decay: 0.0001
   min_lr: 0.000001
-  warmup_epochs: 1
-  grad_accum_steps: 1
+  warmup_epochs: 0
+  grad_accum_steps: 2
   mixed_precision: true
   gradient_clip: 1.0
-  label_smoothing: 0.02
+  label_smoothing: 0.01
   pos_weight: 1.0
   use_dev: true
-  early_stopping: 4
+  early_stopping: 5
+  group_clusters: 24
 
 augment:
   hflip: 0.5
-  color_jitter: 0.4
-  coarse_dropout: 0.2
-  blur: 0.15
-  shift_scale_rotate: 0.5
+  color_jitter: 0.25
+  coarse_dropout: 0.08
+  blur: 0.10
+  shift_scale_rotate: 0.45
 
 infer:
-  batch_size: 16
+  batch_size: 12
   tta: [none, hflip]
   checkpoint_glob: fold*_best.pt
