@@ -5,8 +5,8 @@
 이 코드는 다음 대회 조건을 기준으로 작성했습니다.
 - 입력은 `front.png`, `top.png` 두 시점 이미지입니다.
 - `train`에는 10초짜리 `simulation.mp4`가 포함되지만, 제출 추론에는 사용할 수 없습니다.
-- `train.csv`, `dev.csv`에는 `id`, `label`이 있고, `sample_submission.csv`에는 `id`, `unstable_prob`, `stable_prob`가 있습니다. citeturn499536search0turn326102view0
-- 공개 가중치의 사전학습 모델은 사용할 수 있고, OpenAI/Gemini 같은 원격 API 기반 모델은 사용할 수 없습니다. citeturn828105view0
+- `train.csv`, `dev.csv`에는 `id`, `label`이 있고, `sample_submission.csv`에는 `id`, `unstable_prob`, `stable_prob`가 있습니다. 
+- 공개 가중치의 사전학습 모델은 사용할 수 있고, OpenAI/Gemini 같은 원격 API 기반 모델은 사용할 수 없습니다. 
 
 ## 폴더 구조
 
@@ -127,6 +127,3 @@ drive.mount('/content/drive')
 - `cv_summary.json`
 - `submission.csv`
 
-## 메모
-
-이 코드는 바로 제출 가능한 형태를 목표로 만든 베이스라인보다 한 단계 높은 구조지만, 실제 점수는 데이터 경로, 이미지 크기, backbone, batch size, fold 수에 따라 달라집니다. `image_size=384`, `batch_size=8`, backbone 교체, seed ensemble까지 들어가면 추가 개선 여지가 있습니다.
